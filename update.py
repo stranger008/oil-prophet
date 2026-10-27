@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 油先知 · 自动计算调价幅度
-每次运行直接替换HTML里的实际值，不依赖占位符
+每天抓布伦特实时价存到prices.json，积累20天数据后自动算变化率
 """
 import re
-import csv
-import io
+import json
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 BASE = Path(__file__).parent
 HTML = BASE / "index.html"
+PRICES_FILE = BASE / "prices.json"
 
 FX = 7.2
 BARREL_PER_TON = 7.35
@@ -37,7 +37,7 @@ def get_gd_prices():
             "p0": float(p0.group(1)) if p0 else 8.31,
         }
     except Exception as e:
-        print(f"WARN: 广东现价抓取失败: {e}")
+        print(f"WARN: 广东现价失败: {e}")
         return {"p92": 8.63, "p95": 9.35, "p0": 8.31}
 
 
@@ -55,40 +55,35 @@ def get_brent():
         return None
 
 
-def fred_series(fred_id):
-    try:
-        url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={fred_id}"
-        text = fetch(url, timeout=30)
-        rows = list(csv.reader(io.StringIO(text)))[1:]
-        result = []
-        for row in rows:
-            if len(row) >= 2 and row[1] != ".":
-                result.append((row[0], float(row[1])))
-        return result
-    except Exception as e:
-        print(f"WARN: FRED {fred_id} 失败: {e}")
-        return []
+def load_prices():
+    if PRICES_FILE.exists():
+        return json.loads(PRICES_FILE.read_text(encoding="utf-8"))
+    return {}
 
 
-def calc_forecast():
-    brent = fred_series("DCOILBRENTEA")
-    dubai = fred_series("DCOILDUBACI")
-    if len(brent) < 20:
-        print(f"WARN: 布伦特数据不足({len(brent)}条)")
+def save_prices(data):
+    PRICES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def calc_forecast(brent_now):
+    """用积累的布伦特价格算变化率"""
+    prices = load_prices()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # 今天的数据
+    if brent_now:
+        prices[today] = brent_now
+        save_prices(prices)
+
+    # 排序取最近20天
+    dates = sorted(prices.keys())[-20:]
+    if len(dates) < 20:
+        print(f"WARN: 历史数据不足({len(dates)}天)，需要20天")
         return None
 
-    brent = brent[-20:]
-    dubai_map = {d: p for d, p in dubai[-20:]} if dubai else {}
-
-    weighted = []
-    for date, b_price in brent:
-        d_price = dubai_map.get(date, b_price - 1.5)
-        minas = b_price + 2.5
-        w = b_price * 0.4 + d_price * 0.3 + minas * 0.3
-        weighted.append(w)
-
-    current_avg = sum(weighted[10:]) / 10
-    prev_avg = sum(weighted[:10]) / 10
+    history = [prices[d] for d in dates]
+    current_avg = sum(history[10:]) / 10
+    prev_avg = sum(history[:10]) / 10
     change_pct = (current_avg - prev_avg) / prev_avg * 100
     amount = (current_avg - prev_avg) * FX * BARREL_PER_TON * TRANSMISSION
 
@@ -109,7 +104,7 @@ def calc_forecast():
 def main():
     prices = get_gd_prices()
     brent_now = get_brent()
-    fc = calc_forecast()
+    fc = calc_forecast(brent_now)
 
     if not fc:
         fc = {"direction": "up", "amount_per_ton": 340, "p92": 0.27, "p95": 0.29, "p0": 0.28, "change_pct": 0}
@@ -121,23 +116,18 @@ def main():
 
     html = HTML.read_text(encoding="utf-8")
 
-    # 替换大数字（+0.27那个）
     html = re.sub(r'(class="big-num[^"]*"[^>]*>)[+\-\d.]+',
                   lambda m: m.group(1) + f"{sign}{big_num}", html)
 
-    # 替换说明文字
     desc = f"预计{dir_cn} 92# 汽油约 {abs(fc['p92']):.2f} 元/升（{fc['amount_per_ton']}元/吨，变化率{fc['change_pct']}%）"
     html = re.sub(r'预计(上调|下调|搁浅)[^<]*', desc, html)
 
-    # 替换更新时间
     html = re.sub(r'更新时间：[^<]+', f"更新时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}", html)
 
-    # 替换三油现价
     html = re.sub(r'(id="p92">)[\d.]+', lambda m: m.group(1) + f"{prices['p92']:.2f}", html)
     html = re.sub(r'(id="p95">)[\d.]+', lambda m: m.group(1) + f"{prices['p95']:.2f}", html)
     html = re.sub(r'(id="p0">)[\d.]+', lambda m: m.group(1) + f"{prices['p0']:.2f}", html)
 
-    # 替换预测价
     html = re.sub(r'(id="p92next">→ 预测 )[\d.]+',
                   lambda m: m.group(1) + f"{prices['p92'] + s*fc['p92']:.2f}", html)
     html = re.sub(r'(id="p95next">→ 预测 )[\d.]+',
@@ -145,7 +135,6 @@ def main():
     html = re.sub(r'(id="p0next">→ 预测 )[\d.]+',
                   lambda m: m.group(1) + f"{prices['p0'] + s*fc['p0']:.2f}", html)
 
-    # 替换布伦特当前价
     if brent_now:
         html = re.sub(r'(周期开始 [\d.]+ → 当前\s*)[\d.]+',
                       lambda m: m.group(1) + f"{brent_now:.2f}", html)
