@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>油先知 · 广东油价预测</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛢</text></svg>">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f4f6fa; color: #1a2332; line-height: 1.6; min-height: 100vh;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }
+  .brand { text-align: center; font-size: 15px; color: #8a99ad; margin-bottom: 20px; }
+  .brand b { color: #0f2744; font-size: 18px; }
+
+  .main {
+    background: linear-gradient(135deg, #0f2744, #1a3a5c);
+    color: #fff; border-radius: 16px; padding: 28px 24px;
+    text-align: center; margin-bottom: 16px;
+  }
+  .main .when { font-size: 13px; color: #a8b8cc; margin-bottom: 12px; }
+  .main .predict { font-size: 48px; font-weight: 700; color: #ff6b6b; line-height: 1.1; }
+  .main .predict.down { color: #51cf66; }
+  .main .predict.flat { color: #a8b8cc; }
+  .main .predict small { font-size: 16px; font-weight: 400; color: #a8b8cc; }
+  .main .per-liter { font-size: 14px; color: #ffd166; margin-top: 8px; }
+  .main .countdown { font-size: 13px; color: #a8b8cc; margin-top: 14px; }
+
+  .cycle { background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+  .cycle .label { font-size: 13px; color: #6b7a90; margin-bottom: 10px; display: flex; justify-content: space-between; }
+  .bar { display: flex; gap: 3px; height: 10px; border-radius: 5px; overflow: hidden; }
+  .bar i { flex: 1; background: #e8edf3; }
+  .bar i.done { background: #b8c8dc; }
+  .bar i.today { background: #f39c12; }
+
+  .crude { background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+  .crude h3 { font-size: 13px; color: #6b7a90; font-weight: 500; margin-bottom: 12px; }
+  .crude-note { text-align: center; font-size: 12px; color: #8a99ad; margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f3f7; }
+
+  .prices { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .prices h2 { font-size: 14px; color: #6b7a90; font-weight: 500; margin-bottom: 14px; text-align: center; }
+  .price-row { display: flex; justify-content: space-around; text-align: center; }
+  .price-row .p .t { font-size: 13px; color: #8a99ad; }
+  .price-row .p .v { font-size: 26px; font-weight: 700; color: #0f2744; font-variant-numeric: tabular-nums; }
+  .price-row .p .u { font-size: 12px; color: #8a99ad; }
+  .price-row .p .next { font-size: 12px; color: #e74c3c; margin-top: 4px; font-weight: 600; }
+  .price-row .p .next.down { color: #27ae60; }
+
+  .note { text-align: center; font-size: 12px; color: #8a99ad; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><b>油先知</b> · 广东油价</div>
+
+  <div class="main">
+    <div class="when">下一轮调价窗口 · 10月29日 24:00</div>
+    <div class="predict" id="predict">+0.27 <small>元/升</small></div>
+    <div class="per-liter" id="per-liter">预计上调 92# 汽油约 0.27 元/升</div>
+    <div class="countdown">距离调价还有 2 天 · 最终以发改委公告为准</div>
+  </div>
+
+  <div class="cycle">
+    <div class="label">
+      <span>本轮计价周期</span>
+      <span>第 8 / 10 个工作日</span>
+    </div>
+    <div class="bar" id="bar"></div>
+  </div>
+
+  <div class="crude">
+    <h3>本轮国际油价 · 布伦特原油（美元/桶）</h3>
+    <svg viewBox="0 0 300 130" style="width:100%;height:auto;display:block;">
+      <line x1="30" y1="20" x2="290" y2="20" stroke="#eef2f7" stroke-width="1"/>
+      <line x1="30" y1="65" x2="290" y2="65" stroke="#eef2f7" stroke-width="1"/>
+      <line x1="30" y1="100" x2="290" y2="100" stroke="#eef2f7" stroke-width="1"/>
+      <text x="4" y="24" font-size="9" fill="#8a99ad">118</text>
+      <text x="4" y="69" font-size="9" fill="#8a99ad">113</text>
+      <text x="4" y="104" font-size="9" fill="#8a99ad">108</text>
+      <polyline points="30,83 67,90 104,90 141,83 178,58 215,20 252,82 289,73"
+        fill="none" stroke="#f39c12" stroke-width="2" stroke-linejoin="round"/>
+      <circle cx="30" cy="83" r="3" fill="#f39c12"/>
+      <circle cx="67" cy="90" r="3" fill="#f39c12"/>
+      <circle cx="104" cy="90" r="3" fill="#f39c12"/>
+      <circle cx="141" cy="83" r="3" fill="#f39c12"/>
+      <circle cx="178" cy="58" r="3" fill="#f39c12"/>
+      <circle cx="215" cy="20" r="4" fill="#e74c3c"/>
+      <circle cx="252" cy="82" r="3" fill="#f39c12"/>
+      <circle cx="289" cy="73" r="4" fill="#0f2744"/>
+      <text x="215" y="14" font-size="9" fill="#e74c3c" text-anchor="middle">117.38</text>
+      <text x="289" y="67" font-size="9" fill="#0f2744" text-anchor="end" font-weight="600">111.20</text>
+      <text x="30" y="118" font-size="9" fill="#8a99ad" text-anchor="middle">10-16</text>
+      <text x="141" y="118" font-size="9" fill="#8a99ad" text-anchor="middle">10-21</text>
+      <text x="215" y="118" font-size="9" fill="#8a99ad" text-anchor="middle">10-23</text>
+      <text x="289" y="118" font-size="9" fill="#8a99ad" text-anchor="middle">今天</text>
+    </svg>
+    <div class="crude-note">周期开始 109.95 → 当前 111.20 美元 · 10-23 冲高后回落</div>
+  </div>
+
+  <div class="prices">
+    <h2>当前广东最高零售价（元/升）</h2>
+    <div class="price-row">
+      <div class="p">
+        <div class="t">92# 汽油</div>
+        <div class="v" id="p92">8.63</div>
+        <div class="u">元/升</div>
+        <div class="next" id="p92next">→ 预测 8.90</div>
+      </div>
+      <div class="p">
+        <div class="t">95# 汽油</div>
+        <div class="v" id="p95">9.35</div>
+        <div class="u">元/升</div>
+        <div class="next" id="p95next">→ 预测 9.64</div>
+      </div>
+      <div class="p">
+        <div class="t">0# 柴油</div>
+        <div class="v" id="p0">8.31</div>
+        <div class="u">元/升</div>
+        <div class="next" id="p0next">→ 预测 8.59</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    更新时间：2026-10-27 14:23<br>
+    数据来自公开网络，仅供参考 · 实际以发改委公告为准
+  </div>
+</div>
+
+<script>
+(function(){
+  var bar = document.getElementById('bar');
+  var cycleDay = 8;
+  var cycleTotal = 10;
+  for (var i = 1; i <= cycleTotal; i++) {
+    var s = document.createElement('i');
+    if (i < cycleDay) s.className = 'done';
+    if (i === cycleDay) s.className = 'today';
+    bar.appendChild(s);
+  }
+})();
+</script>
+</body>
+</html>
