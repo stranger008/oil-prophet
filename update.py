@@ -15,56 +15,64 @@ HTML = BASE / "index.html"
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ===== 仅需偶尔调整的参数 =====
-FX = 7.2          # 美元兑人民币汇率
-BARREL_PER_TON = 7.35  # 1吨原油≈7.35桶
-TRANSMISSION = 1.0    # 正常区间内原油成本变化1:1传导到成品油
-# ================================
+FX = 7.2
+BARREL_PER_TON = 7.35
+TRANSMISSION = 1.0
 
 
-def fetch(url, timeout=15):
-    req = urllib.request.Request(url, headers=HEADERS)
+def fetch(url, timeout=30, headers=None):
+    h = headers or HEADERS
+    req = urllib.request.Request(url, headers=h)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", "ignore")
 
 
 def get_gd_prices():
-    """抓广东三油现价"""
-    html = fetch("https://m.icauto.com.cn/oil/price_440000_0.html")
-    p92 = re.search(r"92号汽油[^0-9]*?为\s*([\d.]+)\s*元", html)
-    p95 = re.search(r"95号汽油[^0-9]*?为\s*([\d.]+)\s*元", html)
-    p0 = re.search(r"0号柴油[^0-9]*?为\s*([\d.]+)\s*元", html)
-    return {
-        "p92": float(p92.group(1)) if p92 else 8.63,
-        "p95": float(p95.group(1)) if p95 else 9.35,
-        "p0": float(p0.group(1)) if p0 else 8.31,
-    }
+    """抓广东三油现价，失败用默认值"""
+    try:
+        html = fetch("https://m.icauto.com.cn/oil/price_440000_0.html", timeout=20)
+        p92 = re.search(r"92号汽油[^0-9]*?为\s*([\d.]+)\s*元", html)
+        p95 = re.search(r"95号汽油[^0-9]*?为\s*([\d.]+)\s*元", html)
+        p0 = re.search(r"0号柴油[^0-9]*?为\s*([\d.]+)\s*元", html)
+        return {
+            "p92": float(p92.group(1)) if p92 else 8.63,
+            "p95": float(p95.group(1)) if p95 else 9.35,
+            "p0": float(p0.group(1)) if p0 else 8.31,
+        }
+    except Exception as e:
+        print(f"WARN: 广东现价抓取失败: {e}")
+        return {"p92": 8.63, "p95": 9.35, "p0": 8.31}
 
 
 def get_brent():
-    """抓布伦特实时价（新浪）"""
+    """抓布伦特实时价"""
     try:
         req = urllib.request.Request(
             "https://hq.sinajs.cn/list=hf_OIL",
             headers={"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
         )
-        h = urllib.request.urlopen(req, timeout=8).read().decode("gbk", "ignore")
+        h = urllib.request.urlopen(req, timeout=10).read().decode("gbk", "ignore")
         m = re.search(r'"([\d.]+)', h)
         return float(m.group(1)) if m else None
-    except Exception:
+    except Exception as e:
+        print(f"WARN: 布伦特实时价抓取失败: {e}")
         return None
 
 
 def fred_series(fred_id):
-    """从FRED抓原油每日价格CSV，返回 [(date, price), ...]"""
-    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={fred_id}"
-    text = fetch(url, timeout=20)
-    rows = list(csv.reader(io.StringIO(text)))[1:]
-    result = []
-    for row in rows:
-        if len(row) >= 2 and row[1] != ".":
-            result.append((row[0], float(row[1])))
-    return result
+    """从FRED抓原油每日价格CSV"""
+    try:
+        url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={fred_id}"
+        text = fetch(url, timeout=30)
+        rows = list(csv.reader(io.StringIO(text)))[1:]
+        result = []
+        for row in rows:
+            if len(row) >= 2 and row[1] != ".":
+                result.append((row[0], float(row[1])))
+        return result
+    except Exception as e:
+        print(f"WARN: FRED {fred_id} 抓取失败: {e}")
+        return []
 
 
 def calc_forecast():
@@ -72,42 +80,32 @@ def calc_forecast():
     brent = fred_series("DCOILBRENTEA")
     dubai = fred_series("DCOILDUBACI")
 
-    # 取最近20个交易日
-    brent = brent[-20:]
-    dubai = dubai[-20:]
+    if len(brent) < 20:
+        print(f"WARN: 布伦特数据不足({len(brent)}条)")
+        return None
 
-    # 对齐日期
+    brent = brent[-20:]
+    dubai = dubai[-20:] if dubai else []
     dubai_map = {d: p for d, p in dubai}
 
     weighted = []
     for date, b_price in brent:
-        d_price = dubai_map.get(date, b_price)  # 缺迪拜就用布伦特异代替
-        minas = b_price + 2.5  # 米纳斯通常比布伦特高约2.5美元
-        # 4:3:3加权
+        d_price = dubai_map.get(date, b_price - 1.5)
+        minas = b_price + 2.5
         w = b_price * 0.4 + d_price * 0.3 + minas * 0.3
         weighted.append((date, w))
 
-    if len(weighted) < 20:
-        return None
-
-    current_avg = sum(p for _, p in weighted[10:]) / 10   # 本期10天均价
-    prev_avg = sum(p for _, p in weighted[:10]) / 10       # 上期10天均价
-
+    current_avg = sum(p for _, p in weighted[10:]) / 10
+    prev_avg = sum(p for _, p in weighted[:10]) / 10
     change_pct = (current_avg - prev_avg) / prev_avg * 100
-
-    # 原油成本变化(元/吨)
     cost_change = (current_avg - prev_avg) * FX * BARREL_PER_TON
-    # 传导到成品油
     amount_per_ton = cost_change * TRANSMISSION
 
-    # 折合每升
     p92_per_liter = amount_per_ton / 1350
     p95_per_liter = amount_per_ton / 1300
     p0_per_liter = amount_per_ton / 1190
 
     direction = "up" if amount_per_ton > 0 else ("down" if amount_per_ton < 0 else "flat")
-
-    # 50元/吨以下搁浅
     if abs(amount_per_ton) < 50:
         direction = "flat"
         amount_per_ton = 0
@@ -120,8 +118,6 @@ def calc_forecast():
         "p95_per_liter": round(p95_per_liter, 2),
         "p0_per_liter": round(p0_per_liter, 2),
         "change_pct": round(change_pct, 2),
-        "current_avg": round(current_avg, 2),
-        "prev_avg": round(prev_avg, 2),
     }
 
 
