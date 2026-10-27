@@ -116,7 +116,7 @@ def main():
 
     html = HTML.read_text(encoding="utf-8")
 
-    html = re.sub(r'(class="big-num[^"]*"[^>]*>)[+\-\d.]+',
+    html = re.sub(r'(class="predict" id="predict">)[+\-\d.]+',
                   lambda m: m.group(1) + f"{sign}{big_num}", html)
 
     desc = f"预计{dir_cn} 92# 汽油约 {abs(fc['p92']):.2f} 元/升（{fc['amount_per_ton']}元/吨，变化率{fc['change_pct']}%）"
